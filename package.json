@@ -1,0 +1,17 @@
+{
+  "name": "discord-webhook-relay",
+  "version": "1.0.0",
+  "description": "Password-gated relay for sending Discord webhook messages",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.6",
+    "discord.js": "^14.26.5",
+    "express": "^4.19.2"
+  }
+}
