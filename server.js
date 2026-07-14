@@ -3,6 +3,7 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const path = require('path');
 const { Client, GatewayIntentBits, PermissionsBitField, ChannelType } = require('discord.js');
+const emoji = require('node-emoji');
 
 const app = express();
 app.use(express.json());
@@ -25,6 +26,7 @@ if (!BOT_TOKEN || !GUILD_ID) {
 const MAX_CACHED_MESSAGES = 30;
 const messageCaches = new Map(); // channelId -> [{ id, author, content, timestamp }]
 let availableChannels = []; // [{ id, name }]
+let availableMembers = []; // [{ id, name }]
 let bot = null;
 let botReady = false;
 
@@ -32,9 +34,32 @@ function toMsg(m) {
   return {
     id: m.id,
     author: m.author.username,
-    content: m.content,
+    content: displayify(m.content),
     timestamp: m.createdTimestamp
   };
+}
+
+function displayify(content) {
+  let out = emoji.unemojify(content);
+  // Replace raw <@id> / <@!id> mention syntax with readable @name
+  out = out.replace(/<@!?(\d+)>/g, (match, id) => {
+    const member = availableMembers.find(m => m.id === id);
+    return member ? `@${member.name}` : match;
+  });
+  return out;
+}
+
+// Turns "@name" typed by the user into a real Discord mention (<@id>) so it actually pings.
+// Matches the longest member name first so "@John Smith" doesn't get cut short at "@John".
+function pingify(content) {
+  const sorted = [...availableMembers].sort((a, b) => b.name.length - a.name.length);
+  let out = content;
+  for (const member of sorted) {
+    const escaped = member.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`@${escaped}\\b`, 'gi');
+    out = out.replace(re, `<@${member.id}>`);
+  }
+  return out;
 }
 
 async function primeChannelCache(channelId) {
@@ -54,7 +79,8 @@ if (BOT_TOKEN && GUILD_ID) {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent
+      GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildMembers
     ]
   });
 
@@ -72,6 +98,14 @@ if (BOT_TOKEN && GUILD_ID) {
         .map(c => ({ id: c.id, name: c.name }))
         .sort((a, b) => a.name.localeCompare(b.name));
       console.log(`Found ${availableChannels.length} usable channels.`);
+
+      const members = await guild.members.fetch();
+      availableMembers = members
+        .filter(m => !m.user.bot)
+        .map(m => ({ id: m.id, name: m.nickname || m.user.username }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      console.log(`Found ${availableMembers.length} members.`);
+
       botReady = true;
     } catch (err) {
       console.error('Failed to load channel list:', err.message);
@@ -185,6 +219,16 @@ app.get('/api/channels', (req, res) => {
   res.json({ channels: availableChannels });
 });
 
+app.get('/api/members', (req, res) => {
+  if (!isValidSession(req.cookies.session)) {
+    return res.status(401).json({ error: 'Not authenticated.' });
+  }
+  if (!botReady) {
+    return res.status(503).json({ error: 'Bot is still starting up, try again shortly.' });
+  }
+  res.json({ members: availableMembers });
+});
+
 app.get('/api/messages', async (req, res) => {
   if (!isValidSession(req.cookies.session)) {
     return res.status(401).json({ error: 'Not authenticated.' });
@@ -220,7 +264,8 @@ app.post('/api/send', async (req, res) => {
 
   try {
     const channel = await bot.channels.fetch(channelId);
-    await channel.send(content.trim().slice(0, 2000));
+    const resolved = pingify(content.trim().slice(0, 2000));
+    await channel.send(resolved);
     return res.json({ ok: true });
   } catch (err) {
     console.error(err);
