@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discord Webhook Sender</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #313338;
+    font-family: "gg sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #dbdee1;
+  }
+  .card {
+    background: #2b2d31;
+    width: 100%;
+    max-width: 460px;
+    border-radius: 8px;
+    padding: 28px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+    color: #f2f3f5;
+  }
+  p.sub {
+    margin: 0 0 20px;
+    font-size: 13px;
+    color: #949ba4;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #b5bac1;
+    margin-bottom: 6px;
+    margin-top: 16px;
+  }
+  input, textarea {
+    width: 100%;
+    background: #1e1f22;
+    border: 1px solid #1e1f22;
+    border-radius: 4px;
+    padding: 10px 12px;
+    color: #dbdee1;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+  }
+  input:focus, textarea:focus {
+    outline: none;
+    border-color: #5865f2;
+  }
+  textarea { min-height: 90px; }
+  button {
+    margin-top: 20px;
+    width: 100%;
+    background: #5865f2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button:hover { background: #4752c4; }
+  button:disabled {
+    background: #3f4249;
+    cursor: not-allowed;
+  }
+  #status {
+    margin-top: 14px;
+    font-size: 13px;
+    min-height: 18px;
+  }
+  .ok { color: #23a55a; }
+  .err { color: #f23f42; }
+  .hint {
+    margin-top: 24px;
+    font-size: 12px;
+    color: #80848e;
+    line-height: 1.5;
+    border-top: 1px solid #3f4147;
+    padding-top: 14px;
+  }
+  .hint code {
+    background: #1e1f22;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="gateCard">
+    <h1>Enter Password</h1>
+    <p class="sub">This page is locked.</p>
+    <label for="passwordInput">Password</label>
+    <input id="passwordInput" type="password" placeholder="Enter password" autocomplete="off">
+    <button id="unlockBtn">Unlock</button>
+    <div id="gateStatus"></div>
+  </div>
+
+  <div class="card" id="mainCard" style="display:none;">
+    <h1>Send a message to Discord</h1>
+    <p class="sub">Paste a channel webhook URL and fire off a message.</p>
+
+    <label for="username">Display Name <span style="text-transform:none;color:#5c5e66;">(optional)</span></label>
+    <input id="username" type="text" placeholder="e.g. Site Bot">
+
+    <label for="message">Message</label>
+    <textarea id="message" placeholder="Type your message..."></textarea>
+
+    <button id="sendBtn">Send Message</button>
+    <div id="status"></div>
+
+    <div class="hint">
+      Get a webhook URL from Discord: <strong>Server Settings → Integrations → Webhooks → New Webhook</strong>,
+      pick a channel, then copy the URL. The URL grants posting rights to that channel, so keep it private
+      and never share this file with the URL already filled in. Everything here runs locally in your
+      browser — no server involved.
+    </div>
+  </div>
+
+<script>
+// Password to access the page — change this to whatever you like.
+const SITE_PASSWORD = "changeme";
+
+const gateCard = document.getElementById('gateCard');
+const mainCard = document.getElementById('mainCard');
+const passwordInput = document.getElementById('passwordInput');
+const unlockBtn = document.getElementById('unlockBtn');
+const gateStatus = document.getElementById('gateStatus');
+
+function tryUnlock() {
+  if (passwordInput.value === SITE_PASSWORD) {
+    gateCard.style.display = 'none';
+    mainCard.style.display = 'block';
+  } else {
+    gateStatus.textContent = 'Incorrect password.';
+    gateStatus.className = 'err';
+    passwordInput.value = '';
+  }
+}
+
+unlockBtn.addEventListener('click', tryUnlock);
+passwordInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') tryUnlock();
+});
+
+// Hardcoded webhook URL — paste yours between the quotes below.
+const FIXED_WEBHOOK_URL = "PASTE_YOUR_WEBHOOK_URL_HERE";
+
+const usernameInput = document.getElementById('username');
+const messageInput = document.getElementById('message');
+const sendBtn = document.getElementById('sendBtn');
+const status = document.getElementById('status');
+
+sendBtn.addEventListener('click', async () => {
+  const webhookUrl = FIXED_WEBHOOK_URL.trim();
+  const username = usernameInput.value.trim();
+  const content = messageInput.value.trim();
+
+  status.textContent = '';
+  status.className = '';
+
+  if (!webhookUrl) {
+    status.textContent = 'Please enter a webhook URL.';
+    status.className = 'err';
+    return;
+  }
+  if (!/^https:\/\/discord(app)?\.com\/api\/webhooks\//.test(webhookUrl)) {
+    status.textContent = 'That doesn\'t look like a valid Discord webhook URL.';
+    status.className = 'err';
+    return;
+  }
+  if (!content) {
+    status.textContent = 'Message cannot be empty.';
+    status.className = 'err';
+    return;
+  }
+
+  const payload = { content };
+  if (username) payload.username = username;
+
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Sending...';
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok || res.status === 204) {
+      status.textContent = 'Message sent!';
+      status.className = 'ok';
+      messageInput.value = '';
+    } else {
+      const text = await res.text();
+      status.textContent = `Discord returned an error (${res.status}): ${text.slice(0, 150)}`;
+      status.className = 'err';
+    }
+  } catch (err) {
+    status.textContent = 'Network error — check the console for details.';
+    status.className = 'err';
+    console.error(err);
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send Message';
+  }
+});
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    sendBtn.click();
+  }
+});
+</script>
+</body>
+</html>
