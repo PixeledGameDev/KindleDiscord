@@ -80,7 +80,6 @@ if (BOT_TOKEN && GUILD_ID) {
 
   bot.on('messageCreate', (msg) => {
     if (!availableChannels.some(c => c.id === msg.channelId)) return;
-    if (msg.author.bot) return; // skip bot's own sent messages
     const cache = messageCaches.get(msg.channelId) || [];
     cache.push(toMsg(msg));
     messageCaches.set(msg.channelId, cache.length > MAX_CACHED_MESSAGES ? cache.slice(-MAX_CACHED_MESSAGES) : cache);
