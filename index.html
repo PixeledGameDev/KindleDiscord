@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Discord Chat</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #313338;
+    font-family: "gg sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #dbdee1;
+  }
+  .card {
+    background: #2b2d31;
+    width: 100%;
+    max-width: 460px;
+    border-radius: 8px;
+    padding: 28px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #f2f3f5; }
+  p.sub { margin: 0 0 20px; font-size: 13px; color: #949ba4; }
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #b5bac1;
+    margin-bottom: 6px;
+    margin-top: 16px;
+  }
+  input, textarea, select {
+    width: 100%;
+    background: #1e1f22;
+    border: 1px solid #1e1f22;
+    border-radius: 4px;
+    padding: 10px 12px;
+    color: #dbdee1;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+  }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: #5865f2; }
+  textarea { min-height: 70px; }
+  button {
+    margin-top: 20px;
+    width: 100%;
+    background: #5865f2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: #4752c4; }
+  button:disabled { background: #3f4249; cursor: not-allowed; }
+  #status, #gateStatus { margin-top: 14px; font-size: 13px; min-height: 18px; }
+  .ok { color: #23a55a; }
+  .err { color: #f23f42; }
+  .logout {
+    margin-top: 10px;
+    background: transparent;
+    border: 1px solid #3f4147;
+    color: #949ba4;
+    font-weight: 400;
+  }
+  .logout:hover { background: #3f4147; }
+  #feed {
+    background: #1e1f22;
+    border-radius: 4px;
+    padding: 10px 12px;
+    max-height: 240px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+  <div class="card" id="gateCard">
+    <h1>Enter Password</h1>
+    <p class="sub">This page is locked.</p>
+    <label for="passwordInput">Password</label>
+    <input id="passwordInput" type="password" placeholder="Enter password" autocomplete="current-password">
+    <button id="unlockBtn">Unlock</button>
+    <div id="gateStatus"></div>
+  </div>
+
+  <div class="card" id="mainCard" style="display:none;">
+    <h1>Discord Chat</h1>
+    <p class="sub">Pick a channel, read, and send.</p>
+
+    <label for="channelSelect">Channel</label>
+    <select id="channelSelect"></select>
+
+    <div id="feed" style="margin-top:12px;"></div>
+
+    <label for="message">Message</label>
+    <textarea id="message" placeholder="Type your message..."></textarea>
+
+    <button id="sendBtn">Send Message</button>
+    <div id="status"></div>
+    <button id="logoutBtn" class="logout">Log out</button>
+  </div>
+
+<script>
+const gateCard = document.getElementById('gateCard');
+const mainCard = document.getElementById('mainCard');
+const passwordInput = document.getElementById('passwordInput');
+const unlockBtn = document.getElementById('unlockBtn');
+const gateStatus = document.getElementById('gateStatus');
+const channelSelect = document.getElementById('channelSelect');
+const feed = document.getElementById('feed');
+const messageInput = document.getElementById('message');
+const sendBtn = document.getElementById('sendBtn');
+const status = document.getElementById('status');
+const logoutBtn = document.getElementById('logoutBtn');
+
+let pollTimer = null;
+let currentChannelId = null;
+
+function showMain() {
+  gateCard.style.display = 'none';
+  mainCard.style.display = 'block';
+}
+function showGate() {
+  mainCard.style.display = 'none';
+  gateCard.style.display = 'block';
+  passwordInput.value = '';
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function renderMessages(messages) {
+  feed.innerHTML = messages.map(m => {
+    const time = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<div style="margin-bottom:6px;"><strong style="color:#f2f3f5;">${escapeHtml(m.author)}</strong> <span style="color:#5c5e66;">${time}</span><br>${escapeHtml(m.content)}</div>`;
+  }).join('');
+  feed.scrollTop = feed.scrollHeight;
+}
+
+async function loadChannels() {
+  const res = await fetch('/api/channels');
+  if (res.status === 401) { showGate(); return; }
+  const data = await res.json();
+  const channels = data.channels || [];
+  channelSelect.innerHTML = channels.map(c => `<option value="${c.id}">#${escapeHtml(c.name)}</option>`).join('');
+  if (channels.length) {
+    currentChannelId = channels[0].id;
+    startPolling();
+  }
+}
+
+async function pollMessages() {
+  if (!currentChannelId) return;
+  try {
+    const res = await fetch(`/api/messages?channelId=${encodeURIComponent(currentChannelId)}`);
+    if (res.status === 401) { stopPolling(); showGate(); return; }
+    const data = await res.json();
+    renderMessages(data.messages || []);
+  } catch (err) { /* retry next interval */ }
+}
+
+function startPolling() {
+  pollMessages();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollMessages, 5000);
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+channelSelect.addEventListener('change', () => {
+  currentChannelId = channelSelect.value;
+  feed.innerHTML = '';
+  startPolling();
+});
+
+async function checkAuth() {
+  const res = await fetch('/api/check');
+  const data = await res.json();
+  if (data.authenticated) {
+    showMain();
+    loadChannels();
+  }
+}
+checkAuth();
+
+async function tryUnlock() {
+  gateStatus.textContent = '';
+  gateStatus.className = '';
+  unlockBtn.disabled = true;
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passwordInput.value })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showMain();
+      loadChannels();
+    } else {
+      gateStatus.textContent = data.error || 'Incorrect password.';
+      gateStatus.className = 'err';
+      passwordInput.value = '';
+    }
+  } catch (err) {
+    gateStatus.textContent = 'Network error.';
+    gateStatus.className = 'err';
+  } finally {
+    unlockBtn.disabled = false;
+  }
+}
+
+unlockBtn.addEventListener('click', tryUnlock);
+passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+
+sendBtn.addEventListener('click', async () => {
+  const content = messageInput.value.trim();
+  status.textContent = '';
+  status.className = '';
+
+  if (!currentChannelId) {
+    status.textContent = 'No channel selected.';
+    status.className = 'err';
+    return;
+  }
+  if (!content) {
+    status.textContent = 'Message cannot be empty.';
+    status.className = 'err';
+    return;
+  }
+
+  sendBtn.disabled = true;
+  sendBtn.textContent = 'Sending...';
+
+  try {
+    const res = await fetch('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelId: currentChannelId, content })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      status.textContent = 'Message sent!';
+      status.className = 'ok';
+      messageInput.value = '';
+      pollMessages();
+    } else if (res.status === 401) {
+      status.textContent = 'Session expired, please log in again.';
+      status.className = 'err';
+      stopPolling();
+      showGate();
+    } else {
+      status.textContent = data.error || 'Something went wrong.';
+      status.className = 'err';
+    }
+  } catch (err) {
+    status.textContent = 'Network error.';
+    status.className = 'err';
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send Message';
+  }
+});
+
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendBtn.click();
+});
+
+logoutBtn.addEventListener('click', async () => {
+  stopPolling();
+  await fetch('/api/logout', { method: 'POST' });
+  showGate();
+});
+</script>
+</body>
+</html>
