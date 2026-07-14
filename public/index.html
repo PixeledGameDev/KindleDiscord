@@ -73,7 +73,7 @@
     font-weight: 400;
   }
   .logout:hover { background: #3f4147; }
-  #feed {
+  #feed, #memberListView {
     background: #1e1f22;
     border-radius: 4px;
     padding: 10px 12px;
@@ -82,6 +82,22 @@
     font-size: 13px;
     line-height: 1.5;
   }
+  .member-item {
+    padding: 8px 6px;
+    border-bottom: 1px solid #2b2d31;
+    cursor: pointer;
+    color: #dbdee1;
+  }
+  .member-item:last-child { border-bottom: none; }
+  .member-item:active { background: #313338; }
+  .secondary-btn {
+    margin-top: 8px;
+    background: transparent;
+    border: 1px solid #3f4147;
+    color: #b5bac1;
+    font-weight: 500;
+  }
+  .secondary-btn:hover { background: #3f4147; }
 </style>
 </head>
 <body>
@@ -102,8 +118,16 @@
     <select id="channelSelect"></select>
 
     <div id="feed" style="margin-top:12px;"></div>
+    <div id="memberListView" style="margin-top:12px; display:none;"></div>
+    <button id="toggleMembersBtn" class="secondary-btn">👥 View Members</button>
 
     <label for="message">Message</label>
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <select id="mentionSelect" style="flex:1;">
+        <option value="">Mention someone…</option>
+      </select>
+      <button id="mentionBtn" style="margin-top:0; width:auto; padding:10px 14px; flex-shrink:0;">Add</button>
+    </div>
     <textarea id="message" placeholder="Type your message..."></textarea>
 
     <button id="sendBtn">Send Message</button>
@@ -118,6 +142,8 @@ const passwordInput = document.getElementById('passwordInput');
 const unlockBtn = document.getElementById('unlockBtn');
 const gateStatus = document.getElementById('gateStatus');
 const channelSelect = document.getElementById('channelSelect');
+const mentionSelect = document.getElementById('mentionSelect');
+const mentionBtn = document.getElementById('mentionBtn');
 const feed = document.getElementById('feed');
 const messageInput = document.getElementById('message');
 const sendBtn = document.getElementById('sendBtn');
@@ -143,10 +169,16 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+let memberNameById = {};
+
 function renderMessages(messages) {
   feed.innerHTML = messages.map(m => {
     const time = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    return `<div style="margin-bottom:6px;"><strong style="color:#f2f3f5;">${escapeHtml(m.author)}</strong> <span style="color:#5c5e66;">${time}</span><br>${escapeHtml(m.content)}</div>`;
+    const content = escapeHtml(m.content).replace(/&lt;@!?(\d+)&gt;/g, (match, id) => {
+      const name = memberNameById[id];
+      return name ? `<span style="color:#949cf2;">@${escapeHtml(name)}</span>` : match;
+    });
+    return `<div style="margin-bottom:6px;"><strong style="color:#f2f3f5;">${escapeHtml(m.author)}</strong> <span style="color:#5c5e66;">${time}</span><br>${content}</div>`;
   }).join('');
   feed.scrollTop = feed.scrollHeight;
 }
@@ -162,6 +194,29 @@ async function loadChannels() {
     startPolling();
   }
 }
+
+async function loadMembers() {
+  const res = await fetch('/api/members');
+  if (res.status === 401) { showGate(); return; }
+  const data = await res.json();
+  const members = data.members || [];
+  memberNameById = Object.fromEntries(members.map(m => [m.id, m.name]));
+  mentionSelect.innerHTML = '<option value="">Mention someone…</option>' +
+    members.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
+}
+
+mentionBtn.addEventListener('click', () => {
+  const id = mentionSelect.value;
+  if (!id) return;
+  const mention = `<@${id}> `;
+  const start = messageInput.selectionStart ?? messageInput.value.length;
+  const end = messageInput.selectionEnd ?? messageInput.value.length;
+  messageInput.value = messageInput.value.slice(0, start) + mention + messageInput.value.slice(end);
+  messageInput.focus();
+  const cursor = start + mention.length;
+  messageInput.setSelectionRange(cursor, cursor);
+  mentionSelect.value = '';
+});
 
 async function pollMessages() {
   if (!currentChannelId) return;
@@ -196,6 +251,7 @@ async function checkAuth() {
   if (data.authenticated) {
     showMain();
     loadChannels();
+    loadMembers();
   }
 }
 checkAuth();
@@ -214,6 +270,7 @@ async function tryUnlock() {
     if (res.ok) {
       showMain();
       loadChannels();
+      loadMembers();
     } else {
       gateStatus.textContent = data.error || 'Incorrect password.';
       gateStatus.className = 'err';
